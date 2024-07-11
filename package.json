@@ -1,0 +1,36 @@
+{
+  "dependencies": {
+    "@firebase/analytics": "^0.10.4",
+    "@firebase/app": "^0.10.5",
+    "@google-cloud/storage": "^7.11.2",
+    "bcrypt": "^5.1.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "firebase": "^10.12.2",
+    "firebase-admin": "^12.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "node": "^20.15.0",
+    "nodemon": "^3.1.4",
+    "path": "^0.12.7",
+    "uuid-v4": "^0.1.0"
+  },
+  "name": "docmaster-backend",
+  "version": "1.0.0",
+  "main": "App.js",
+  "scripts": {
+    "start": "nodemon App.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MoyalShoham/DocMasterServer.git"
+  },
+  "author": "Shoham Moyal",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MoyalShoham/DocMasterServer/issues"
+  },
+  "homepage": "https://github.com/MoyalShoham/DocMasterServer#readme",
+  "description": ""
+}

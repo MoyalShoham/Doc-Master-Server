@@ -1,0 +1,5 @@
+node_modules
+.env
+fireBase-Config.js
+uploads
+doc-master-server-firebase-adminsdk-8sor4-7f05846648.json

@@ -1,0 +1,59 @@
+###
+
+
+POST http://localhost:3000/user/register
+Content-Type: application/json
+
+{
+    "email": "moyalshoham@gmail.com",
+    "password": "123456",
+    "full_name": "Shoham Moyal"
+}
+
+
+
+###
+
+
+POST http://localhost:3000/user/login
+Content-Type: application/json
+
+{
+    "email": "moyalshoham@gmail.com",
+    "password": "123456"
+}
+
+
+
+###
+
+GET http://localhost:3000/user/bla-bla
+
+
+
+###
+
+
+POST http://localhost:3000/user/upload
+Content-Type: application/json
+
+{
+    "file_path": "C:/Users/moyal/Desktop/DocMaster-Review.docx"
+}
+
+###
+
+GET http://localhost:3000/user
+
+
+
+###
+
+
+DELETE http://localhost:3000/user/delete
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJWM2FUaFAyTFFmZ28xZXpmQUxEYTY2NHhoSmwxIiwiaWF0IjoxNzIwNjk2ODI2LCJleHAiOjE3MjA2OTk4MjZ9.RHp5Ti3PBbmuu0n8m0zrZsHlBHwqqebNzE4teWx3Yy0
+Content-Type: application/json
+
+{
+    "file_url": "https://storage.googleapis.com/doc-master-server.appspot.com/V3aThP2LQfgo1ezfALDa664xhJl1_Market-Survey_DocMaster.pdf"
+}
