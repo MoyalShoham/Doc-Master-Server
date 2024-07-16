@@ -134,9 +134,7 @@ const refresh = async (req, res) => {
 }
 
 
-router.get('/', (req, res) => {
-    res.send('User Get');
-});
+
 
 const register = async (req, res) =>  {
 
@@ -166,6 +164,29 @@ const register = async (req, res) =>  {
         res.status(400).send(error.message);
     }
 };
+
+const getUsers = async (req, res) => {
+    const userQuery = query(collection(db, "users"));
+    const querySnapshot = await getDocs(userQuery);
+
+    if (querySnapshot.empty) {
+        return res.status(400).send("user not found");
+    } else {
+        let users = [];
+        querySnapshot.forEach((doc) => {
+            let userData = doc.data();
+            // Remove the 'tokens' key from userData
+            // let { tokens, ...userWithoutTokens } = userData;
+
+            users.push(userData);
+        });
+        return res.status(200).send(users);
+    }
+};
+
+
+router.get('/', getUsers);
+
 
 
 const login = async (req, res) => {
