@@ -165,27 +165,22 @@ const register = async (req, res) =>  {
     }
 };
 
-const getUsers = async (req, res) => {
+const getUser = async (req, res) => {
+    const user = req.body.user;
     const userQuery = query(collection(db, "users"));
-    const querySnapshot = await getDocs(userQuery);
+    const querySnapshot = await getDocs(userQuery, where("_uid", "==", user.uid));
 
     if (querySnapshot.empty) {
         return res.status(400).send("user not found");
     } else {
-        let users = [];
-        querySnapshot.forEach((doc) => {
-            let userData = doc.data();
-            // Remove the 'tokens' key from userData
-            // let { tokens, ...userWithoutTokens } = userData;
-
-            users.push(userData);
-        });
-        return res.status(200).send(users);
+        
+        const user = querySnapshot.docs[0].data();
+        return res.status(200).send(user);
     }
 };
 
 
-router.get('/', getUsers);
+router.get('/', authMiddleware, getUser);
 
 
 
