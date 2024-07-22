@@ -124,7 +124,7 @@ const getUser = async (req, res) => {
     const userData = querySnapshot.docs[0].data();
     return res.status(200).send(userData);
   }
-};
+};  
 
 router.get('/', getUser);
 
@@ -145,6 +145,8 @@ const login = async (req, res) => {
 
     const userObj = user.user;
     const { accessToken, refreshToken } = generateTokens(userObj.uid);
+
+    console.log('User:', userObj.uid);
 
     const userQuery = query(collection(db, "users"), where("_uid", "==", userObj.uid));
     const querySnapshot = await getDocs(userQuery);
