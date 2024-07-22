@@ -22,23 +22,29 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 const generateTokens = (userId) => {
-  console.log('generateTokens:', userId);
-  const accessToken = jwt.sign(
-    { uid: userId },
-    process.env.TOKEN_SECRET,
-    { expiresIn: process.env.TOKEN_EXPIRATION }
-  );
-
-  const refreshToken = jwt.sign(
-    { uid: userId, salt: Math.random() },
-    process.env.REFRESH_TOKEN_SECRET
-  );
-
-  return {
-    accessToken: accessToken,
-    refreshToken: refreshToken,
+    const accessToken = jwt.sign(
+      {
+        uid: userId,
+      },
+      process.env.TOKEN_SECRET,
+      {
+        expiresIn: process.env.TOKEN_EXPIRATION,
+      }
+    );
+  
+    const refreshToken = jwt.sign(
+      {
+        uid: userId,
+        salt: Math.random(),
+      },
+      process.env.REFRESH_TOKEN_SECRET
+    );
+  
+    return {
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+    };
   };
-};
 
 const refresh = async (req, res) => {
   const authHeader = req.headers['authorization'];
@@ -115,6 +121,7 @@ const register = async (req, res) => {
 
 const getUser = async (req, res) => {
   const user = req.body.user;
+  console.log('User:', req.body.user);
   const userQuery = query(collection(db, "users"), where("_uid", "==", user.uid));
   const querySnapshot = await getDocs(userQuery);
 
@@ -126,7 +133,7 @@ const getUser = async (req, res) => {
   }
 };  
 
-router.get('/', getUser);
+router.get('/', authMiddleware, getUser);
 
 const login = async (req, res) => {
   console.log('Login Request:', req.body);
