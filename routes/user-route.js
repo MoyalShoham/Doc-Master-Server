@@ -2,23 +2,13 @@ const express = require('express');
 const router = express.Router();
 const { auth, db } = require('../fireBase-Config');
 const { createUserWithEmailAndPassword, signInWithEmailAndPassword } = require('firebase/auth');
-const { addDoc, collection, setDoc } = require('firebase/firestore');
+const { addDoc, collection, setDoc, getDocs, query, where, updateDoc, arrayUnion, arrayRemove } = require('firebase/firestore');
 const multer = require('multer');
 const path = require('path');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
-const User = require('../models/user-model');
-const { set, update } = require('firebase/database');
-const { doc } = require('firebase/firestore');
-const { arrayUnion, arrayRemove } = require('firebase/firestore');
-const { updateDoc } = require('firebase/firestore');
-const { getDocs, query, where } = require('firebase/firestore');
-const authMiddleware = require('../common/auth-middleware');
-const { getStorage, ref, uploadBytes} = require('firebase/storage');
-const { getDownloadURL } = require('firebase/storage');
-const uuid = require('uuid-v4');
 const admin = require("firebase-admin");
-
+const authMiddleware = require('../common/auth-middleware');
+const uuid = require('uuid-v4');
 const serviceAccount = require("../doc-master-server-firebase-adminsdk-8sor4-7f05846648.json");
 
 admin.initializeApp({
@@ -28,341 +18,248 @@ admin.initializeApp({
 });
 
 const bucket = admin.storage().bucket();
-
 const storage = multer.memoryStorage();
-
 const upload = multer({ storage: storage });
 
-
-// const firebase_storage = getStorage();
-
-// const storageRef = ref(firebase_storage, 'uploads/');
-
-// Set the base URL for the uploaded files
-const base = 'http://localhost:3000/uploads/';
-
-
-
-
-
-
-
-
-// // Configure multer storage
-// const storage = multer.diskStorage({
-//     destination: function (req, file, cb) {
-//         cb(null, 'uploads/');
-//     },
-//     filename: function (req, file, cb) {
-//         cb(null, file.originalname);
-//     },
-// });
-
-// const upload = multer({ storage: storage });
-
-
 const generateTokens = (userId) => {
-    console.log('generateTokens:', userId);
-    const accessToken = jwt.sign(
-      {
-        uid: userId,
-      },
-      process.env.TOKEN_SECRET,
-      {
-        expiresIn: process.env.TOKEN_EXPIRATION,
-      }
-    );
-  
-    const refreshToken = jwt.sign(
-      {
-        uid: userId,
-        salt: Math.random(),
-      },
-      process.env.REFRESH_TOKEN_SECRET
-    );
-  
-    return {
-      accessToken: accessToken,
-      refreshToken: refreshToken,
-    };
+  console.log('generateTokens:', userId);
+  const accessToken = jwt.sign(
+    { uid: userId },
+    process.env.TOKEN_SECRET,
+    { expiresIn: process.env.TOKEN_EXPIRATION }
+  );
+
+  const refreshToken = jwt.sign(
+    { uid: userId, salt: Math.random() },
+    process.env.REFRESH_TOKEN_SECRET
+  );
+
+  return {
+    accessToken: accessToken,
+    refreshToken: refreshToken,
   };
+};
 
 const refresh = async (req, res) => {
-    //extract token from http header
-    const authHeader = req.headers['authorization'];
-    const refreshTokenOrig = authHeader && authHeader.split(' ')[1];
+  const authHeader = req.headers['authorization'];
+  const refreshTokenOrig = authHeader && authHeader.split(' ')[1];
 
-    if (refreshTokenOrig == null) {
-        return res.status(401).send("missing token");
+  if (!refreshTokenOrig) {
+    return res.status(401).send("Missing token");
+  }
+
+  jwt.verify(refreshTokenOrig, process.env.REFRESH_TOKEN_SECRET, async (err, userInfo) => {
+    if (err) {
+      return res.status(403).send("Invalid token");
     }
-
-    //verify token
-    jwt.verify(refreshTokenOrig, process.env.REFRESH_TOKEN_SECRET, async (err, userInfo) => {
-        if (err) {
-            return res.status(403).send("invalid token");
-        }
-
-        try {
-            const user = await User.findById(userInfo._id);
-            if (user == null || user.tokens == null || !user.tokens.includes(refreshTokenOrig)) {
-                if (user.tokens != null) {
-                    user.tokens = [];
-                    await user.save();
-                }
-                return res.status(403).send("invalid token");
-            }
-
-            //generate new access token
-            const { accessToken, refreshToken } = generateTokens(user._uid.toString());
-
-            //update refresh token in db
-            user.tokens = user.tokens.filter(token => token != refreshTokenOrig);
-            user.tokens.push(refreshToken);
-            await user.save();
-
-            //return new access token & new refresh token
-            return res.status(200).send({
-                accessToken: accessToken,
-                refreshToken: refreshToken
-            });
-        } catch (error) {
-            console.log(error);
-            return res.status(400).send(error.message);
-        }
-    });
-
-}
-
-
-
-
-const register = async (req, res) =>  {
 
     try {
-        const { full_name, email, password } = req.body;
+      const userQuery = query(collection(db, "users"), where("_uid", "==", userInfo.uid));
+      const querySnapshot = await getDocs(userQuery);
 
-        if (email == null || password == null) {
-            return res.status(400).send("missing email or password");
+      if (querySnapshot.empty) {
+        return res.status(403).send("Invalid token");
+      }
+
+      const userDocRef = querySnapshot.docs[0].ref;
+      const user = querySnapshot.docs[0].data();
+
+      if (!user.tokens || !user.tokens.includes(refreshTokenOrig)) {
+        if (user.tokens) {
+          await updateDoc(userDocRef, { tokens: [] });
         }
+        return res.status(403).send("Invalid token");
+      }
 
-        try{
-            const docRef = await createUserWithEmailAndPassword(auth, email, password);
-            const userObj = docRef.user;
-        }catch(error){
-            return res.status(400).send(error.message);
-        }
+      const { accessToken, refreshToken } = generateTokens(user._uid.toString());
+      await updateDoc(userDocRef, {
+        tokens: arrayUnion(refreshToken),
+        tokens: arrayRemove(refreshTokenOrig)
+      });
 
-
-        await addDoc(collection(db, "users"), {
-            full_name: full_name,
-            email: email,
-            _uid: userObj?.uid
-        });
-
-        res.status(201).send(`${full_name} ${email} ${password}`);
+      return res.status(200).send({
+        accessToken: accessToken,
+        refreshToken: refreshToken
+      });
     } catch (error) {
-        res.status(400).send(error.message);
+      console.log(error);
+      return res.status(400).send(error.message);
     }
+  });
+};
+
+const register = async (req, res) => {
+  try {
+    console.log('Register Request:', req.body);
+    const { full_name, email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).send("Missing email or password");
+    }
+
+    const docRef = await createUserWithEmailAndPassword(auth, email, password);
+    const userObj = docRef.user;
+
+    console.log('User:', userObj?.uid);
+    await addDoc(collection(db, "users"), {
+      full_name: full_name,
+      email: email,
+      _uid: userObj?.uid
+    });
+
+    res.status(201).send(`${full_name} ${email} ${password}`);
+  } catch (error) {
+    res.status(400).send(error.message);
+  }
 };
 
 const getUser = async (req, res) => {
-    const user = req.body.user;
-    const userQuery = query(collection(db, "users"));
-    const querySnapshot = await getDocs(userQuery, where("_uid", "==", user.uid));
+  const user = req.body.user;
+  const userQuery = query(collection(db, "users"), where("_uid", "==", user.uid));
+  const querySnapshot = await getDocs(userQuery);
 
-    if (querySnapshot.empty) {
-        return res.status(400).send("user not found");
-    } else {
-        
-        const user = querySnapshot.docs[0].data();
-        return res.status(200).send(user);
-    }
+  if (querySnapshot.empty) {
+    return res.status(400).send("User not found");
+  } else {
+    const userData = querySnapshot.docs[0].data();
+    return res.status(200).send(userData);
+  }
 };
 
-
-router.get('/', authMiddleware, getUser);
-
-
+router.get('/', getUser);
 
 const login = async (req, res) => {
+  console.log('Login Request:', req.body);
+  const { email, password } = req.body;
 
-    console.log('Login Request:', req.body);
-    const { email, password } = req.body;
-    
-    if (email == null || password == null) {
-        return res.status(400).send("missing email or password");
+  if (!email || !password) {
+    return res.status(400).send("Missing email or password");
+  }
+
+  try {
+    const user = await signInWithEmailAndPassword(auth, email, password);
+
+    if (!user) {
+      return res.status(400).send("Invalid email or password");
     }
 
-    try {
-        const user = await signInWithEmailAndPassword(auth, email, password);
-        
-        if (user == null) {
-            return res.status(400).send("invalid email or password");
-        }
+    const userObj = user.user;
+    const { accessToken, refreshToken } = generateTokens(userObj.uid);
 
-        const userObj = user.user;
-        userObj.tokens = null;
-        const { accessToken, refreshToken } = generateTokens(userObj.uid);
+    const userQuery = query(collection(db, "users"), where("_uid", "==", userObj.uid));
+    const querySnapshot = await getDocs(userQuery);
 
-        if (user.tokens == null) {
-            user.tokens = [refreshToken];
-        } else {
-            user.tokens.push(refreshToken);
-        }
-
-
-        const userQuery = query(collection(db, "users"), where("_uid", "==", userObj.uid));
-
-        const querySnapshot = await getDocs(userQuery);
-
-        if (querySnapshot.empty) {
-            return res.status(400).send("user not found");
-        }
-        else {
-            const userDocRef = querySnapshot.docs[0].ref;
-            
-            await updateDoc(userDocRef, {
-                tokens: arrayUnion(refreshToken)        
-            })
-
-        }
-
-        // const userDocRef = doc(db, "users", userObj.uid);
-
-        // await u(doc(db, "users", userObj.uid), userObj);
-
-
-
-        // await user.save();
-        return res.status(200).send({
-            accessToken: accessToken,
-            refreshToken: refreshToken,
-            user: userObj
-        });
-    } catch (error) {
-        console.log(error);
-        return res.status(400).send(error.message);
+    if (querySnapshot.empty) {
+      return res.status(400).send("User not found");
     }
-}
+
+    const userDocRef = querySnapshot.docs[0].ref;
+    await updateDoc(userDocRef, {
+      tokens: arrayUnion(refreshToken)
+    });
+
+    return res.status(200).send({
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+      user: userObj
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(400).send(error.message);
+  }
+};
 
 router.post('/register', register);
 router.post('/login', login);
 
-
 router.put('/', authMiddleware, async (req, res) => {
-    res.send('User Put');
+  res.send('User Put');
 });
 
 router.delete('/', (req, res) => {
-    res.send('User Delete');
+  res.send('User Delete');
 });
 
-
 router.get('/bla-bla', authMiddleware, (req, res) => {
-    console.log('User:', req.body.user);
-    res.send('User bla-bla ' + req.body.user);
+  console.log('User:', req.body.user);
+  res.send('User bla-bla ' + req.body.user);
 });
 
 router.post('/upload', upload.single('file'), authMiddleware, async (req, res) => {
-    console.log('User:', req.body);
-    const user = req.body.user.uid;
+  console.log('User:', req.body.user);
+  const user = req.body.user.uid;
 
+  if (!req.file) {
+    return res.status(400).send('No file uploaded.');
+  }
 
-    // console.log('User:', user);
+  const metadata = {
+    metadata: {
+      fireBaseStorageDownloadTokens: uuid()
+    },
+    contentType: req.file.mimetype,
+    cacheControl: 'public, max-age=31536000',
+  };
 
-    if (!req.file) {
-        return res.status(400).send('No file uploaded.');
-    }
+  const blob = bucket.file(`${user}_${req.file.originalname}`);
+  const blobStream = blob.createWriteStream({
+    metadata: metadata,
+    gzip: true
+  });
 
-    const metadata = {
-        metadata: {
-            fireBaseStorageDownloadTokens: uuid()
-        },
-        contentType: req.file.mimetype,
-        cacheControl: 'public, max-age=31536000',
-    };
+  const userQuery = query(collection(db, "users"), where("_uid", "==", user));
+  const querySnapshot = await getDocs(userQuery);
 
-    // console.log('Usssssser:', user);
-
-    const blob = bucket.file(`${user}_${req.file.originalname}`);
-    const blobStream = blob.createWriteStream({
-        metadata: metadata,
-        gzip: true
+  if (querySnapshot.empty) {
+    return res.status(400).send("User not found");
+  } else {
+    const userDocRef = querySnapshot.docs[0].ref;
+    await updateDoc(userDocRef, {
+      posts: arrayUnion(`https://storage.googleapis.com/${bucket.name}/${blob.name}`)
     });
+  }
 
-    
-    const userQuery = query(collection(db, "users"), where("_uid", "==", user));
+  blobStream.on('error', (err) => {
+    console.error(err);
+    return res.status(400).send('Error uploading file');
+  });
 
-    const querySnapshot = await getDocs(userQuery);
-
-    if (querySnapshot.empty) {
-        return res.status(400).send("user not found");
-    }
-    else {
-        const userDocRef = querySnapshot.docs[0].ref;
-        
-        await updateDoc(userDocRef, {
-            posts: arrayUnion(`https://storage.googleapis.com/${bucket.name}/${blob.name}`)        
-        })
-
-    }
-
-    blobStream.on('error', (err) => {
-        console.error(err);
-        return res.status(400).send('Error uploading file');
+  blobStream.on('finish', async () => {
+    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
+    res.status(200).json({
+      message: 'success',
+      url: publicUrl,
     });
+  });
 
-    blobStream.on('finish', async () => {
-        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
-        res.status(200).json({
-            message: 'success',
-            url: publicUrl,
-        });
-    });
-
-    blobStream.end(req.file.buffer);
+  blobStream.end(req.file.buffer);
 });
-
-
-// delete file
 
 router.delete('/delete', authMiddleware, async (req, res) => {
+  const file_url = req.body.file_url;
+  console.log('File URL:', file_url);
 
-    const file_url = req.body.file_url;
-    console.log('File URL:', file_url);
+  const fileName = file_url.split('/').pop();
+  const user = req.body.user.uid;
 
-    const fileName = file_url.split('/').pop();
+  const userQuery = query(collection(db, "users"), where("_uid", "==", user));
+  const querySnapshot = await getDocs(userQuery);
+  const blob = bucket.file(fileName);
 
-    const user = req.body.user.uid;
-
-    const userQuery = query(collection(db, "users"), where("_uid", "==", user));
-
-    const querySnapshot = await getDocs(userQuery);
-
-    const blob = bucket.file(fileName);
-
-
-    if (querySnapshot.empty) {
-        return res.status(400).send("user not found");
-    }
-    else {
-        const userDocRef = querySnapshot.docs[0].ref;
-
-        
-        await updateDoc(userDocRef, {
-            posts: arrayRemove(file_url)
-        })
-
-    }
-
-    
-
-    blob.delete().then(() => {
-        res.status(200).send('File deleted');
-    }).catch((error) => {
-        res.status(400).send('Error deleting file');
+  if (querySnapshot.empty) {
+    return res.status(400).send("User not found");
+  } else {
+    const userDocRef = querySnapshot.docs[0].ref;
+    await updateDoc(userDocRef, {
+      posts: arrayRemove(file_url)
     });
-});
+  }
 
+  blob.delete().then(() => {
+    res.status(200).send('File deleted');
+  }).catch((error) => {
+    res.status(400).send('Error deleting file');
+  });
+});
 
 module.exports = router;

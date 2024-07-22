@@ -17,7 +17,7 @@ Content-Type: application/json
 
 
 GET http://localhost:3000/user
-
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJWM2FUaFAyTFFmZ28xZXpmQUxEYTY2NHhoSmwxIiwiaWF0IjoxNzIxMjMwODk0LCJleHAiOjE3MjEyMzM4OTR9.QwB0IhuohfZA4HNbXAEAFkmiMjMVo8TSLzj88a9kJHg
 ###
 
 
@@ -50,6 +50,7 @@ Content-Type: application/json
 ###
 
 GET http://localhost:3000/user
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJWM2FUaFAyTFFmZ28xZXpmQUxEYTY2NHhoSmwxIiwiaWF0IjoxNzIxMTQ1OTMyLCJleHAiOjE3MjExNDg5MzJ9.XaWOEEokCBHRFMvQMPfWTjsMOAHNFZoLGolIqDCWNfg
 
 
 
