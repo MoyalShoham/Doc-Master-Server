@@ -10,6 +10,8 @@ const admin = require("firebase-admin");
 const authMiddleware = require('../common/auth-middleware');
 const uuid = require('uuid-v4');
 const serviceAccount = require("../doc-master-server-firebase-adminsdk-8sor4-7f05846648.json");
+const { getStorage, getDownloadURL } = require('firebase/storage');
+const { ref } = require('firebase/storage');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -22,29 +24,29 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 const generateTokens = (userId) => {
-    const accessToken = jwt.sign(
-      {
-        uid: userId,
-      },
-      process.env.TOKEN_SECRET,
-      {
-        expiresIn: process.env.TOKEN_EXPIRATION,
-      }
-    );
-  
-    const refreshToken = jwt.sign(
-      {
-        uid: userId,
-        salt: Math.random(),
-      },
-      process.env.REFRESH_TOKEN_SECRET
-    );
-  
-    return {
-      accessToken: accessToken,
-      refreshToken: refreshToken,
-    };
+  const accessToken = jwt.sign(
+    {
+      uid: userId,
+    },
+    process.env.TOKEN_SECRET,
+    {
+      expiresIn: process.env.TOKEN_EXPIRATION,
+    }
+  );
+
+  const refreshToken = jwt.sign(
+    {
+      uid: userId,
+      salt: Math.random(),
+    },
+    process.env.REFRESH_TOKEN_SECRET
+  );
+
+  return {
+    accessToken: accessToken,
+    refreshToken: refreshToken,
   };
+};
 
 const refresh = async (req, res) => {
   const authHeader = req.headers['authorization'];
@@ -131,7 +133,7 @@ const getUser = async (req, res) => {
     const userData = querySnapshot.docs[0].data();
     return res.status(200).send(userData);
   }
-};  
+};
 
 router.get('/', authMiddleware, getUser);
 
@@ -199,50 +201,58 @@ router.post('/upload', upload.single('file'), authMiddleware, async (req, res) =
   const user = req.body.user.uid;
 
   if (!req.file) {
-    return res.status(400).send('No file uploaded.');
+      return res.status(400).send('No file uploaded.');
   }
 
   const metadata = {
-    metadata: {
-      fireBaseStorageDownloadTokens: uuid()
-    },
-    contentType: req.file.mimetype,
-    cacheControl: 'public, max-age=31536000',
+      metadata: {
+          firebaseStorageDownloadTokens: uuid(),
+      },
+      contentType: req.file.mimetype,
+      cacheControl: 'public, max-age=31536000',
   };
 
   const blob = bucket.file(`${user}_${req.file.originalname}`);
   const blobStream = blob.createWriteStream({
-    metadata: metadata,
-    gzip: true
+      metadata: metadata,
+      gzip: true,
   });
 
-  const userQuery = query(collection(db, "users"), where("_uid", "==", user));
-  const querySnapshot = await getDocs(userQuery);
-
-  if (querySnapshot.empty) {
-    return res.status(400).send("User not found");
-  } else {
-    const userDocRef = querySnapshot.docs[0].ref;
-    await updateDoc(userDocRef, {
-      posts: arrayUnion(`https://storage.googleapis.com/${bucket.name}/${blob.name}`)
-    });
-  }
-
   blobStream.on('error', (err) => {
-    console.error(err);
-    return res.status(400).send('Error uploading file');
+      console.error(err);
+      return res.status(400).send('Error uploading file');
   });
 
   blobStream.on('finish', async () => {
-    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
-    res.status(200).json({
-      message: 'success',
-      url: publicUrl,
-    });
+      const publicUrl = `https://storage.googleapis.com/${bucket.name}/${user}_${req.file.originalname}`;
+      console.log('Uploaded URL:', publicUrl);
+
+      await blob.makePublic();
+
+      const userQuery = query(collection(db, "users"), where("_uid", "==", user));
+      const querySnapshot = await getDocs(userQuery);
+
+      if (querySnapshot.empty) {
+          return res.status(400).send("User not found");
+      } else {
+          const userDocRef = querySnapshot.docs[0].ref;
+          await updateDoc(userDocRef, {
+              posts: arrayUnion({
+                  url: publicUrl,
+                  type: req.file.mimetype.includes('image') ? 'image' : 'file'
+              }),
+          });
+      }
+
+      res.status(200).json({
+          message: 'success',
+          url: publicUrl,
+      });
   });
 
   blobStream.end(req.file.buffer);
 });
+
 
 router.delete('/delete', authMiddleware, async (req, res) => {
   const file_url = req.body.file_url;
