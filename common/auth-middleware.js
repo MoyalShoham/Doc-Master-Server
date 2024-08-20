@@ -13,6 +13,7 @@ const authMiddleware = async (req, res, next) => {
         if (err) {
             return res.status(403).send("Invalid token");
         }
+        console.log('auth', req.body)
         req.body.user = user;
         next();
     });
