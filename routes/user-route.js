@@ -11,17 +11,14 @@ const authMiddleware = require('../common/auth-middleware');
 const uuid = require('uuid-v4');
 const serviceAccount = require("../doc-master-server-firebase-adminsdk-8sor4-7f05846648.json");
 const { ref, getDownloadURL, getMetadata, deleteObject, uploadBytesResumable, listAll } = require('firebase/storage');
-const {storage2} = require('../fireBase-Config')
+const { storage2 } = require('../fireBase-Config');
 const axios = require('axios');
-
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   databaseURL: "https://doc-master-server-rtdb.firebaseio.com",
   storageBucket: "doc-master-server.appspot.com"
 });
-
-
 
 const bucket = admin.storage().bucket();
 const storage = multer.memoryStorage();
@@ -101,7 +98,8 @@ const registerUser = async (req, res) => {
     await addDoc(collection(db, "users"), {
       full_name,
       email,
-      _uid: userObj?.uid
+      _uid: userObj?.uid,
+      likedDocs: [] // Initialize likedDocs field
     });
 
     res.status(201).send(`${full_name} ${email} ${password}`);
@@ -177,8 +175,6 @@ const updateFileDetails = async (req, res) => {
     res.status(400).send('Error updating file details');
   }
 };
-
-
 
 // Delete a file
 const deleteFile = async (req, res) => {
@@ -258,15 +254,7 @@ const uploadFile = async (req, res) => {
   blobStream.end(req.file.buffer);
 };
 
-
-async function downloadFileAsBuffer(url) {
-  const response = await axios({
-    method: 'GET',
-    url,
-    responseType: 'arraybuffer',
-  });
-  return Buffer.from(response.data);
-}
+// Rename a file
 const renameFile = async (req, res) => {
   try {
     const user = req.body.user.uid;
@@ -274,84 +262,114 @@ const renameFile = async (req, res) => {
     let newFileName = req.body.newFileName;
 
     if (!oldFileName || !newFileName) {
-      return res.status(400).send('Missing old or new file name.');
+      return res.status(400).send("Missing old or new file name");
     }
 
-    // Ensure the new file name has the correct extension
-    const fileExtension = oldFileName.split('.').pop();
-    if (!newFileName.includes('.')) {
-      newFileName = `${newFileName}.${fileExtension}`;
-    }
-
-    const oldFileRef = bucket.file(oldFileName);
-    const newFileRef = bucket.file(newFileName);
-
-    // Step 1: Download the old file
-    const [fileData] = await oldFileRef.download();
-    console.log('Old file data downloaded successfully');
-
-    // Step 2: Upload the file to the new name with the original metadata
-    const [oldFileMetadata] = await oldFileRef.getMetadata();
-    console.log('Old file metadata retrieved:', oldFileMetadata);
-
-    const newMetadata = {
-      contentType: oldFileMetadata.contentType,
-      customMetadata: oldFileMetadata.customMetadata, // Preserve any custom metadata
-    };
-
-    await newFileRef.save(fileData, {
-      metadata: newMetadata,
-      gzip: true, // Enable Gzip compression
-    });
-    console.log('File uploaded to new location successfully');
-
-    // Step 3: Make the new file public
-    await newFileRef.makePublic();
-    console.log('New file made public successfully');
-
-    // Step 4: Delete the old file
-    await oldFileRef.delete();
-    console.log('Old file deleted successfully');
-
-    // Step 5: Update Firestore with the new file name
     const userQuery = query(collection(db, "users"), where("_uid", "==", user));
     const querySnapshot = await getDocs(userQuery);
 
-    if (!querySnapshot.empty) {
-      const userDocRef = querySnapshot.docs[0].ref;
-      const updatedPosts = querySnapshot.docs[0].data().posts.map(post => 
-        post.url.includes(oldFileName) ? { ...post, url: post.url.replace(oldFileName, `${newFileName}`) } : post
-      );
-
-      await updateDoc(userDocRef, {
-        posts: updatedPosts
-      });
-      console.log('Firestore updated with new file name');
-    } else {
-      console.error('User not found in Firestore');
-      return res.status(400).send('User not found in Firestore');
+    if (querySnapshot.empty) {
+      return res.status(400).send("User not found");
     }
 
-    // Return the new file name
-    res.status(200).send({ success: true, newFileName: `${user}_${newFileName}` });
+    const userDocRef = querySnapshot.docs[0].ref;
+    const userDoc = querySnapshot.docs[0].data();
+
+    // Update the file reference in Firestore
+    const updatedPosts = userDoc.posts.map(post => 
+      post.url.includes(oldFileName) ? { ...post, url: post.url.replace(oldFileName, newFileName), name: newFileName } : post
+    );
+
+    await updateDoc(userDocRef, { posts: updatedPosts });
+
+    // Rename the file in Firebase Storage
+    const oldBlob = bucket.file(oldFileName);
+    const newBlob = bucket.file(newFileName);
+
+    await new Promise((resolve, reject) => {
+      oldBlob.copy(newBlob, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          oldBlob.delete().then(() => resolve()).catch(err => reject(err));
+        }
+      });
+    });
+
+    res.status(200).send('File renamed successfully');
   } catch (error) {
-    console.error('Error renaming file:', error);
-    res.status(500).send({ success: false, message: 'Error renaming file', error: error.message });
+    console.error(error);
+    res.status(400).send('Error renaming file');
   }
 };
 
+// Like a document
+const likeDocument = async (req, res) => {
+  const { userId, fileUrl } = req.body;
 
+  if (!userId || !fileUrl) {
+    return res.status(400).send("Missing user ID or file URL");
+  }
 
+  try {
+    const userQuery = query(collection(db, "users"), where("_uid", "==", userId));
+    const querySnapshot = await getDocs(userQuery);
 
+    if (querySnapshot.empty) {
+      return res.status(400).send("User not found");
+    }
 
+    const userDocRef = querySnapshot.docs[0].ref;
 
-// Route handlers
-router.patch('/rename/:fileName', authMiddleware, renameFile);
-router.get('/', authMiddleware, getUser);
+    await updateDoc(userDocRef, {
+      likedDocs: arrayUnion(fileUrl)
+    });
+
+    res.status(200).send('Document liked successfully');
+  } catch (error) {
+    console.error(error);
+    res.status(400).send('Error liking document');
+  }
+};
+
+// Unlike a document
+const unlikeDocument = async (req, res) => {
+  const { userId, fileUrl } = req.body;
+
+  if (!userId || !fileUrl) {
+    return res.status(400).send("Missing user ID or file URL");
+  }
+
+  try {
+    const userQuery = query(collection(db, "users"), where("_uid", "==", userId));
+    const querySnapshot = await getDocs(userQuery);
+
+    if (querySnapshot.empty) {
+      return res.status(400).send("User not found");
+    }
+
+    const userDocRef = querySnapshot.docs[0].ref;
+
+    await updateDoc(userDocRef, {
+      likedDocs: arrayRemove(fileUrl)
+    });
+
+    res.status(200).send('Document unliked successfully');
+  } catch (error) {
+    console.error(error);
+    res.status(400).send('Error unliking document');
+  }
+};
+
+// Export the routes
 router.post('/register', registerUser);
 router.post('/login', loginUser);
-router.put('/', authMiddleware, updateFileDetails);
-router.delete('/delete', authMiddleware, deleteFile);
-router.post('/upload', upload.single('file'), authMiddleware, uploadFile);
+router.get('/user', authMiddleware, getUser);
+router.put('/updateFileDetails', authMiddleware, updateFileDetails);
+router.delete('/deleteFile', authMiddleware, deleteFile);
+router.post('/upload', authMiddleware, upload.single('file'), uploadFile);
+router.put('/renameFile/:fileName', authMiddleware, renameFile);
+router.post('/like', authMiddleware, likeDocument); // New route for liking documents
+router.post('/unlike', authMiddleware, unlikeDocument); // New route for unliking documents
 
 module.exports = router;
