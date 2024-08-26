@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { auth, db } = require('../fireBase-Config');
+const { auth, db, storage2 } = require('../fireBase-Config');
 const { createUserWithEmailAndPassword, signInWithEmailAndPassword } = require('firebase/auth');
 const { addDoc, collection, setDoc, getDocs, query, where, updateDoc, arrayUnion, arrayRemove } = require('firebase/firestore');
 const multer = require('multer');
@@ -220,8 +220,6 @@ const deleteFile = async (req, res) => {
     res.status(500).send('Error deleting file');
   }
 };
-
-// Upload a file
 const uploadFile = async (req, res) => {
   const user = req.body.user.uid;
   const { name, expiration_date, reminder } = req.body;
@@ -231,7 +229,10 @@ const uploadFile = async (req, res) => {
   }
 
   const metadata = {
-    metadata: { firebaseStorageDownloadTokens: uuid() },
+    metadata: {
+      firebaseStorageDownloadTokens: uuid(),
+      isLiked: false,
+    },
     contentType: req.file.mimetype,
     cacheControl: 'public, max-age=31536000',
   };
@@ -255,7 +256,7 @@ const uploadFile = async (req, res) => {
       return res.status(400).send('User not found');
     } else {
       const userDocRef = querySnapshot.docs[0].ref;
-      await updateDoc(userDocRef, {
+      const updateData = {
         posts: arrayUnion({
           url: publicUrl,
           type: req.file.mimetype.includes('image') ? 'image' : 'file',
@@ -263,7 +264,18 @@ const uploadFile = async (req, res) => {
           expiration_date: expiration_date || null,
           reminder: reminder === 'true'
         }),
-      });
+      };
+
+      // If the reminder checkbox is checked, add the file to the reminders list
+      if (reminder === 'true') {
+        updateData.reminders = arrayUnion({
+          url: publicUrl,
+          name: name || null,
+          expiration_date: expiration_date || null
+        });
+      }
+
+      await updateDoc(userDocRef, updateData);
     }
 
     res.status(200).json({ message: 'success', url: publicUrl });
@@ -271,11 +283,14 @@ const uploadFile = async (req, res) => {
 
   blobStream.end(req.file.buffer);
 };
+
+
 const renameFile = async (req, res) => {
   try {
     const user = req.body.user.uid;
     const oldFileName = `${req.params.fileName}`;
     const newFileNameWithoutExt = req.body.newFileName;
+    const { expiration_date, reminder } = req.body;
 
     if (!oldFileName || !newFileNameWithoutExt) {
       return res.status(400).send('Missing old or new file name');
@@ -298,66 +313,81 @@ const renameFile = async (req, res) => {
       return res.status(404).send('File not found in Firebase Storage');
     }
 
-    // Check if the user exists in Firestore
-    const userQuery = query(collection(db, 'users'), where('_uid', '==', user));
-    const querySnapshot = await getDocs(userQuery);
+    // Get the old file's metadata
+    const [oldMetadata] = await oldBlob.getMetadata();
 
-    if (querySnapshot.empty) {
-      console.log(`User with UID ${user} not found`);
-      return res.status(400).send('User not found');
-    }
+    // Copy the old metadata and add the required fields
+    const newMetadata = {
+      metadata: {
+        firebaseStorageDownloadTokens: uuid(),
+        isLiked: oldMetadata.metadata.isLiked || false,
+      },
+      contentType: oldMetadata.contentType,
+      cacheControl: oldMetadata.cacheControl,
+    };
 
-    const userDocRef = querySnapshot.docs[0].ref;
-    const userDoc = querySnapshot.docs[0].data();
-
-    // Log current posts
-    console.log('Current posts:', userDoc.posts);
-
-    // Update file details in user's document
-    const updatedPosts = userDoc.posts.map(post => {
-      if (post.url.includes(oldFileName)) {
-        const newUrl = post.url.replace(oldFileName, newFileName);
-        return { ...post, url: newUrl, name: newFileNameWithoutExt };
-      }
-      return post;
-    });
-
-    console.log('Updated posts:', updatedPosts);
-
-    await updateDoc(userDocRef, { posts: updatedPosts });
-
-    // Copy the file to the new name and then delete the old file
+    // Create the new blob with updated metadata
     const newBlob = bucket.file(newFileName);
-    await new Promise((resolve, reject) => {
-      oldBlob.copy(newBlob, (err) => {
-        if (err) {
-          console.error(`Error copying file: ${err.message}`);
-          reject(err);
-        } else {
-          oldBlob.delete().then(() => resolve()).catch(err => {
-            console.error(`Error deleting old file: ${err.message}`);
-            reject(err);
-          });
-        }
-      });
+    const newBlobStream = newBlob.createWriteStream({ metadata: newMetadata, gzip: true });
+
+    // Copy the old file data to the new file
+    const oldFileBuffer = await oldBlob.download();
+    newBlobStream.end(oldFileBuffer[0]);
+
+    // Handle stream finish and error events
+    newBlobStream.on('error', (err) => {
+      console.error(`Error creating new file: ${err.message}`);
+      return res.status(400).send('Error renaming file');
     });
 
-    res.status(200).json({ message: 'File renamed successfully', newFileName });
+    newBlobStream.on('finish', async () => {
+      const publicUrl = `https://storage.googleapis.com/${bucket.name}/${newFileName}`;
+      await newBlob.makePublic();
+
+      // Check if the user exists in Firestore
+      const userQuery = query(collection(db, 'users'), where('_uid', '==', user));
+      const querySnapshot = await getDocs(userQuery);
+
+      if (querySnapshot.empty) {
+        console.log(`User with UID ${user} not found`);
+        return res.status(400).send('User not found');
+      }
+
+      const userDocRef = querySnapshot.docs[0].ref;
+      const userDoc = querySnapshot.docs[0].data();
+
+      // Update file details in user's document
+      const updatedPosts = userDoc.posts.map(post => {
+        if (post.url.includes(oldFileName)) {
+          const newUrl = post.url.replace(oldFileName, newFileName);
+          return {
+            ...post,
+            url: newUrl,
+            name: newFileNameWithoutExt,
+            expiration_date: expiration_date || post.expiration_date || null,
+            reminder: reminder !== undefined ? reminder === 'true' : post.reminder,
+          };
+        }
+        return post;
+      });
+
+      await updateDoc(userDocRef, { posts: updatedPosts });
+
+      // Delete the old file from Firebase Storage
+      await oldBlob.delete();
+
+      res.status(200).json({ message: 'File renamed successfully', url: publicUrl });
+    });
   } catch (error) {
     console.error(`Error renaming file: ${error.message}`);
     res.status(400).send('Error renaming file');
   }
 };
 
-
 // Like a document
 const likeDocument = async (req, res) => {
-  const userId = req.body.userId;
+  const userId = req.body.user.uid;
   const fileUrl = req.body.fileUrl;
-
-  console.log('reqBodyLike  ', userId, fileUrl);
-
-  
 
   if (!userId || !fileUrl) {
     return res.status(400).send('Missing user ID or file URL');
@@ -373,8 +403,26 @@ const likeDocument = async (req, res) => {
 
     const userDocRef = querySnapshot.docs[0].ref;
 
+    // Update the file metadata to set `isLiked` to true
+    try {
+      const fileName = fileUrl.split('/').pop(); // Extract file name from URL
+      const file = bucket.file(fileName);
+      const [metadata] = await file.getMetadata();
+      const newMetadata = {
+        metadata: {
+          ...metadata.metadata,
+          isLiked: 'true'  // Set isLiked to true (Note: Firebase metadata values are strings)
+        }
+      };
+      await file.setMetadata(newMetadata);
+    } catch (error) {
+      console.error(`Error updating file metadata: ${error.message}`);
+      return res.status(400).send('Error updating file metadata');
+    }
+
+    // Update the Firestore document to include the liked file
     await updateDoc(userDocRef, {
-      likedDocs: arrayUnion(fileUrl)
+      likedDocs: arrayUnion(fileUrl),
     });
 
     res.status(200).send('Document liked successfully');
@@ -386,9 +434,8 @@ const likeDocument = async (req, res) => {
 
 // Unlike a document
 const unlikeDocument = async (req, res) => {
-  const { userId, fileUrl } = req.body;
-
-  console.log('reqBody', userId, fileUrl);
+  const userId = req.body.user.uid;
+  const fileUrl = req.body.fileUrl;
 
   if (!userId || !fileUrl) {
     return res.status(400).send('Missing user ID or file URL');
@@ -404,8 +451,26 @@ const unlikeDocument = async (req, res) => {
 
     const userDocRef = querySnapshot.docs[0].ref;
 
+    // Update the file metadata to set `isLiked` to false
+    try {
+      const fileName = fileUrl.split('/').pop();
+      const file = bucket.file(fileName);
+      const [metadata] = await file.getMetadata();
+      const newMetadata = {
+        metadata: {
+          ...metadata.metadata,
+          isLiked: 'false'  // Set isLiked to false
+        }
+      };
+      await file.setMetadata(newMetadata);
+    } catch (error) {
+      console.error(`Error updating file metadata: ${error.message}`);
+      return res.status(400).send('Error updating file metadata');
+    }
+
+    // Update the Firestore document to remove the liked file
     await updateDoc(userDocRef, {
-      likedDocs: arrayRemove(fileUrl)
+      likedDocs: arrayRemove(fileUrl),
     });
 
     res.status(200).send('Document unliked successfully');
@@ -414,7 +479,36 @@ const unlikeDocument = async (req, res) => {
     res.status(400).send('Error unliking document');
   }
 };
+const getFileMetadata = async (req, res) => {
+  try {
+    // Extract fileUrl from the request body or query parameters
+    const fileUrl  = req.body.item; // Assuming it's sent in the request body
+
+    if (!fileUrl) {
+      console.log(fileUrl);
+      return res.status(400).send('Missing file URL');
+    }
+
+    // Assuming the fileUrl format is 'https://storage.googleapis.com/<bucket-name>/<file-path>'
+    const filePath = fileUrl.replace(`https://storage.googleapis.com/${bucket.name}/`, '');
+    // console.log('File path:', filePath);
+
+    // Initialize Firebase Storage
+    const fileRef = ref(storage2, filePath);
+
+    // Get the metadata
+    const metadata = await getMetadata(fileRef);
+
+    // console.log('File metadata:', metadata);
+    return res.status(200).json({ metadata });
+  } catch (error) {
+    console.error('Error getting file metadata:', error);
+    return res.status(500).send('Error getting file metadata');
+  }
+};
+
 // Export the routes
+router.post('/getMetadata', getFileMetadata);
 router.post('/register', registerUser);
 router.post('/login', loginUser);
 router.get('/', authMiddleware, getUser);
