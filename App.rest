@@ -64,3 +64,8 @@ Content-Type: application/json
 {
     "file_url": "https://storage.googleapis.com/doc-master-server.appspot.com/V3aThP2LQfgo1ezfALDa664xhJl1_Market-Survey_DocMaster.pdf"
 }
+
+###
+
+GET http://localhost:3000/user/logout
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJWM2FUaFAyTFFmZ28xZXpmQUxEYTY2NHhoSmwxIiwiaWF0IjoxNzI0ODQxMzY5LCJleHAiOjE3MjQ4NDQzNjl9.Z-QnMcXeVSajLFW0v1BGBENwABRzMiNsuue9aBidgIw

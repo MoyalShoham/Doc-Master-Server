@@ -498,7 +498,7 @@ const getFileMetadata = async (req, res) => {
 
     // Get the metadata
     const metadata = await getMetadata(fileRef);
-
+    console.log('metadata', metadata)
     // console.log('File metadata:', metadata);
     return res.status(200).json({ metadata });
   } catch (error) {
@@ -506,6 +506,28 @@ const getFileMetadata = async (req, res) => {
     return res.status(500).send('Error getting file metadata');
   }
 };
+
+const logout = async (req, res) => {
+  const user = req.body.user
+  console.log('user-logout', user.uid)
+  try{
+    const userQuery = query(collection(db, 'users'), where('_uid', '==', user.uid));
+    const querySnapshot = await getDocs(userQuery);
+
+    if (querySnapshot.empty) {
+      return res.status(400).send('User not found');
+    }
+
+    const userDocRef = querySnapshot.docs[0].ref;
+    await updateDoc(userDocRef, { tokens: [] });
+    // remove the token fron jwt
+
+    return res.status(200).send('yes');
+ 
+  }  catch (error) {
+    console.log(error);
+  }
+}
 
 // Export the routes
 router.post('/getMetadata', getFileMetadata);
@@ -518,5 +540,6 @@ router.post('/upload', upload.single('file'), authMiddleware, uploadFile);
 router.patch('/renameFile/:fileName', authMiddleware, renameFile);
 router.post('/like', authMiddleware, likeDocument); // New route for liking documents
 router.post('/unlike', authMiddleware, unlikeDocument); // New route for unliking documents
+router.get('/logout', authMiddleware, logout );
 
 module.exports = router;
