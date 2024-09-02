@@ -21,7 +21,7 @@
   "main": "App.js",
   "scripts": {
     "start": "nodemon App.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "set NODE_ENV=test&& jest"
   },
   "repository": {
     "type": "git",
@@ -33,5 +33,10 @@
     "url": "https://github.com/MoyalShoham/DocMasterServer/issues"
   },
   "homepage": "https://github.com/MoyalShoham/DocMasterServer#readme",
-  "description": ""
+  "description": "",
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  }
 }

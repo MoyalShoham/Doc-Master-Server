@@ -5,7 +5,7 @@ POST http://localhost:3000/user/register
 Content-Type: application/json
 
 {
-    "email": "moyalshoham@gmail.com",
+    "email": "shoham@gmail.com",
     "password": "123456",
     "full_name": "Shoham Moyal"
 }
@@ -68,4 +68,4 @@ Content-Type: application/json
 ###
 
 GET http://localhost:3000/user/logout
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJWM2FUaFAyTFFmZ28xZXpmQUxEYTY2NHhoSmwxIiwiaWF0IjoxNzI0ODQxMzY5LCJleHAiOjE3MjQ4NDQzNjl9.Z-QnMcXeVSajLFW0v1BGBENwABRzMiNsuue9aBidgIw
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJWM2FUaFAyTFFmZ28xZXpmQUxEYTY2NHhoSmwxIiwiaWF0IjoxNzI1Mjg3ODYzLCJleHAiOjE3MjUyOTA4NjN9.ZObdG73_l8bn-WZTWVGIZfLlmf9AwPVi1zOgkS_HPq8

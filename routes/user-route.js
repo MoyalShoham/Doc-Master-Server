@@ -84,14 +84,19 @@ const refreshTokens = async (req, res) => {
 
 // Register a new user
 const registerUser = async (req, res) => {
+  console.log('Received registration request:', req.body);
   try {
     const { full_name, email, password } = req.body;
     if (!email || !password) {
       return res.status(400).send('Missing email or password');
     }
-
+    console.log('Creating user:', email);
     const docRef = await createUserWithEmailAndPassword(auth, email, password);
+
+    console.log('User created:', docRef.user.uid);
     const userObj = docRef.user;
+
+    console.log('User created:', userObj.uid);
 
     await addDoc(collection(db, 'users'), {
       full_name,
@@ -102,9 +107,62 @@ const registerUser = async (req, res) => {
 
     res.status(201).send(`${full_name} ${email} ${password}`);
   } catch (error) {
-    res.status(400).send(error.message);
+    res.status(400).send('An error occurred during registration');
   }
 };
+
+const registerGoogleUser = async (req, res) => {
+  try {
+    const { email, full_name, _uid } = req.body;
+    console.log('Received user data:', { email, full_name, _uid });
+
+    
+    // Step 1: Add user to Firestore
+    const userDocRef = await addDoc(collection(db, 'users'), {
+      full_name: full_name,
+      email: email,
+      _uid: _uid,
+      likedDocs: [], // Initialize likedDocs field
+      tokens: [], // Initialize tokens field if needed
+    });
+
+    console.log('User added to Firestore:', userDocRef.id);
+
+    // Step 2: Generate tokens
+    const { accessToken, refreshToken } = generateTokens(_uid);
+
+    // Step 3: Query for the newly added user
+    const userQuery = query(collection(db, 'users'), where('_uid', '==', _uid));
+    const querySnapshot = await getDocs(userQuery);
+
+    if (querySnapshot.empty) {
+      console.error('User not found in Firestore after adding');
+      return res.status(400).send('User not found');
+    }
+
+    const userDoc = querySnapshot.docs[0];
+    const userDocRef2 = userDoc.ref;
+
+    // Step 4: Update the user's document with the refresh token
+    await updateDoc(userDocRef2, { tokens: arrayUnion(refreshToken) });
+
+    console.log('User tokens updated in Firestore');
+
+    // Step 5: Send response back to the client
+    return res.status(200).send({
+      accessToken,
+      refreshToken,
+      user: {
+        email: email,
+        full_name: full_name,
+        uid: _uid,
+      },
+    });
+  } catch (error) {
+    console.error('Error registering Google user:', error);
+    return res.status(400).send(error.message);
+  }
+}
 
 // Get user information
 const getUser = async (req, res) => {
@@ -120,7 +178,6 @@ const getUser = async (req, res) => {
   }
 };
 
-// Login a user
 const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -128,8 +185,11 @@ const loginUser = async (req, res) => {
       return res.status(400).send('Missing email or password');
     }
 
-    const user = await signInWithEmailAndPassword(auth, email, password);
-    if (!user) {
+    // Attempt to sign in the user
+    let user;
+    try {
+      user = await signInWithEmailAndPassword(auth, email, password);
+    } catch (authError) {
       return res.status(400).send('Invalid email or password');
     }
 
@@ -152,9 +212,10 @@ const loginUser = async (req, res) => {
       user: userObj
     });
   } catch (error) {
-    return res.status(400).send(error.message);
+    return res.status(500).send('An error occurred during login');
   }
 };
+
 
 // Update file details
 const updateFileDetails = async (req, res) => {
@@ -532,6 +593,7 @@ const logout = async (req, res) => {
 // Export the routes
 router.post('/getMetadata', getFileMetadata);
 router.post('/register', registerUser);
+router.post('/register/google', registerGoogleUser)
 router.post('/login', loginUser);
 router.get('/', authMiddleware, getUser);
 router.put('/updateFileDetails', authMiddleware, updateFileDetails);
