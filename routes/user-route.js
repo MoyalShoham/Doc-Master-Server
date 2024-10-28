@@ -84,7 +84,6 @@ const refreshTokens = async (req, res) => {
 
 // Register a new user
 const registerUser = async (req, res) => {
-  console.log('Received registration request:', req.body);
   try {
     const { full_name, email, password } = req.body;
     if (!email || !password) {
@@ -112,9 +111,22 @@ const registerUser = async (req, res) => {
 };
 
 const registerGoogleUser = async (req, res) => {
+  console.log('Received registration request:', req.body);
+``
   try {
     const { email, full_name, _uid } = req.body;
     console.log('Received user data:', { email, full_name, _uid });
+
+    // Check if the user already exists in Firestore
+
+    const uq = query(collection(db, 'users'), where('_uid', '==', _uid));
+    const qs = await getDocs(uq);
+
+    if (!qs.empty) {
+      console.log('User already exists in Firestore');
+      return res.status(400).send('User already exists');
+    } 
+
 
     
     // Step 1: Add user to Firestore
@@ -122,8 +134,9 @@ const registerGoogleUser = async (req, res) => {
       full_name: full_name,
       email: email,
       _uid: _uid,
-      likedDocs: [], // Initialize likedDocs field
-      tokens: [], // Initialize tokens field if needed
+      likedDocs: [], 
+      tokens: [], 
+      posts: [],
     });
 
     console.log('User added to Firestore:', userDocRef.id);
@@ -284,6 +297,8 @@ const deleteFile = async (req, res) => {
 const uploadFile = async (req, res) => {
   const user = req.body.user.uid;
   const { name, expiration_date, reminder } = req.body;
+
+  console.log('Received file upload request:');
 
   if (!req.file) {
     return res.status(400).send('No file uploaded.');
@@ -557,15 +572,24 @@ const getFileMetadata = async (req, res) => {
     // Initialize Firebase Storage
     const fileRef = ref(storage2, filePath);
 
-    // Get the metadata
-    const metadata = await getMetadata(fileRef);
-    console.log('metadata', metadata)
-    // console.log('File metadata:', metadata);
-    return res.status(200).json({ metadata });
-  } catch (error) {
-    console.error('Error getting file metadata:', error);
-    return res.status(500).send('Error getting file metadata');
-  }
+     // Get the metadata
+     const metadata = getMetadata(fileRef).then((metadata) => {
+      console.log('metadata', metadata)
+      // console.log('File metadata:', metadata);
+      return res.status(200).json({ metadata });
+    }).catch((error) => {
+      console.error('Error getting file metadata:', error);
+      return res.status(500).send('Error getting file metadata2222');
+    });
+
+
+    } catch (error) {
+      console.error('Error getting file metadata:', error);
+      return res.status(500).send('Error getting file metadata');
+    }
+
+   
+ 
 };
 
 const logout = async (req, res) => {
